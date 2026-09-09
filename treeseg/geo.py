@@ -152,10 +152,20 @@ def write_gpkg(path: str, geoms, attrs_list, epsg: int, layer_name="crowns", geo
 
 
 def largest_polygon(geom):
-    """MultiPolygon 取面积最大的部分。"""
-    if isinstance(geom, MultiPolygon):
-        return max(geom.geoms, key=lambda g: g.area)
-    return geom
+    """MultiPolygon / GeometryCollection 取面积最大的多边形部分；不含多边形时返回空 Polygon。"""
+    if isinstance(geom, Polygon):
+        return geom
+    polys = []
+    for g in getattr(geom, "geoms", []):
+        if isinstance(g, Polygon):
+            polys.append(g)
+        elif hasattr(g, "geoms"):  # 嵌套集合（如 GeometryCollection 内含 MultiPolygon）
+            sub = largest_polygon(g)
+            if not sub.is_empty:
+                polys.append(sub)
+    if not polys:
+        return Polygon()
+    return max(polys, key=lambda g: g.area)
 
 
 def density_grid(xy: np.ndarray, x0, y0, w, h, res, sigma=2.0):
