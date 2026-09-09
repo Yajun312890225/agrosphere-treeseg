@@ -1,0 +1,9 @@
+# 基础地理/数值依赖（GDAL 建议用 conda 或系统包安装：conda install -c conda-forge gdal）
+numpy>=1.26
+scipy>=1.11
+scikit-image>=0.22
+shapely>=2.0
+pyyaml>=6.0
+tqdm>=4.66
+# 深度学习（先按 https://pytorch.org 安装匹配 CUDA 版本的 torch，再装 ultralytics）
+ultralytics>=8.3
