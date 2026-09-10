@@ -18,7 +18,9 @@ pip install -r requirements.txt
 # 全流程（路径见 scripts/run_example.sh）
 python -m treeseg.prepare  --terra-dir <DJI Terra 目录> --out <work>/prep --gsd 0.05 --ms-gsd 0.2 --te XMIN YMIN XMAX YMAX
 python -m treeseg.labels   --raster <work>/prep/composite.tif --source <供应商 shp/csv> --type points|polygons ... --out <work>/labels.gpkg
-python -m treeseg.dataset  --raster <work>/prep/composite.tif --labels <work>/labels.gpkg --out <work>/dataset --prefix <期次>
+# 只有树点时必须再过一遍 SAM2（圆形伪标签 YOLO 学不动，见"已验证结论"）；sam2.1_b.pt 从 ultralytics assets 下载
+python -m treeseg.labels_sam --raster <work>/prep/composite.tif --labels <work>/labels.gpkg --sam sam2.1_b.pt --ndvi <work>/prep/ndvi.tif --out <work>/labels_sam.gpkg
+python -m treeseg.dataset  --raster <work>/prep/composite.tif --labels <work>/labels_sam.gpkg --out <work>/dataset --prefix <期次> --block 3
 python -m treeseg.train    --data <work>/dataset/data.yaml --model yolo11m-seg.pt --epochs 100 --imgsz 1024 --batch 8
 python -m treeseg.predict  --raster <work>/prep/composite.tif --weights best.pt --out <work>/pred --ms-dir <work>/prep
 python -m treeseg.evaluate --pred <work>/pred/crowns.gpkg --ref <供应商树点> --auto-shift
@@ -33,8 +35,9 @@ python -m treeseg.registry --registry registry.gpkg --new <work>/pred/crowns.gpk
 treeseg/geo.py       坐标/矢量读写/平移估计(互相关+ICP)/一对一匹配；vector_epsg 等要保持 GDAL 数据源引用
 treeseg/prepare.py   DJI Terra 目录 → composite.tif(5cm RGB 或 cir) + ms_*.tif/ndvi.tif/dsm.tif(20cm)，全部 gdalwarp 子进程
 treeseg/labels.py    供应商结果 → labels.gpkg；points 类型按 tree_area 生成圆并可用 NDVI 精修
-treeseg/dataset.py   切片 + YOLO seg 标签，按空间块划分 train/val
-treeseg/train.py     ultralytics 训练封装（翻转/旋转增强，无 mixup）
+treeseg/labels_sam.py 以 labels.gpkg 质心为点提示跑 SAM2，多掩膜按 src_area 选最接近者 + NDVI 过滤，得到真实冠形标签（失败退回原标签）
+treeseg/dataset.py   切片 + YOLO seg 标签，按空间块划分 train/val（--block 3 让验证块打散，6 会整块落在特殊区域）
+treeseg/train.py     ultralytics 训练封装（翻转/旋转增强，无 mixup；nbs=batch 不做梯度累积，mask_ratio 默认 4）
 treeseg/predict.py   滑窗推理 → 核心区过滤 → 跨切片 IoU NMS → gpkg/csv + 逐株 NDVI/NDRE/GNDVI
 treeseg/evaluate.py  与参考树点/树冠比对：召回、精度、欠分割（含 2 点以上树冠数）、冠幅相关
 treeseg/registry.py  跨期 ID 台账（平移估计 + 质心 1.5m 内匹配继承 ID）
@@ -56,6 +59,8 @@ treeseg/export_platform.py  打包成 AgroSphere AI 单树监测导入 zip（底
 - 传统方法（NDVI 掩膜 + DSM/NIR 树顶 + 分水岭）与供应商树点一对一匹配只有 48%～73%，郁闭林分欠分割严重，所以转深度学习。
 - 0524 多光谱上，供应商 0322 病虫害标记无任何光谱差异（12 个特征 AUC 0.50～0.54，逻辑回归 CV AUC 0.59；病害多边形内 NDVI 反而更高），产量与特征 R² 0.07。**从影像复现供应商病虫害/产量不可行**，必须有同期地面调查数据。
 - 大疆智图自带语义分割（segment.tif）不支持八角，整幅判为 other，无用。
+- **圆形伪标签（树点 + tree_area）YOLO 学不动**：yolo11m-seg 训练集 mAP50 仅 0.11、验证集 0.005，换 ultralytics 版本/超参/纯检测都一样。改用 labels_sam.py 的 SAM2 冠形标签后训练集 0.39、验证集 0.27（2026-09-09，A10）。
+- ultralytics 小数据集两个坑：默认 nbs=64 使 batch 8 每轮只更新 2 次；mask_ratio=2 在 24G 显存上 OOM 且无收益。均已在 train.py 处理。
 
 ## 下一步
 
