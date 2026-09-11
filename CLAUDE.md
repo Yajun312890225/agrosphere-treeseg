@@ -62,6 +62,7 @@ treeseg/verify_export.py 移植平台导入解析逻辑（unzip → 定位 → �
   - `那花周哥0811.zip`（46 GB）= 同一块地 2026-08-11 的 DJI Terra 成果（EPSG:4326，1.1 cm，含 4 个多光谱 + DSM），已处理为 `~/nahua_work/prep0811`。
   - `那花6、7月_病虫害与估产合并版.zip`（14.5 GB）= 供应商成果：2026-06/2026-07 各有 RGB tif（1.2 cm，EPSG:4544）、多光谱 4 波段 tif（2 cm）、`单株病虫害估产.shp`（**真实树冠多边形**，5477/6116 株，字段 ID/Pest/Yield/Longitude/Latitude，两期 5358 个 ID 一致，Pest=1 共 223/275）。小文件解在 `~/nahua_work/vendor_0607/`，RGB 已处理为 prep_v06/prep_v07，多边形已转为 labels_v06.gpkg/labels_v07.gpkg（最好的训练标签）。
 - `那花0723-DOM/`（20 GB，已解压的 DJI Terra 目录）：2026-07-21/22 航拍（目录名是处理日期），同一块地，含 4 波段多光谱 + DSM，是供应商 7 月结果的原料；已处理为 `~/nahua_work/prep0723`。
+- 项目根目录三个 rar + 两份 docx（2026-09-10 夜出现，已解到 `~/nahua_work/vendor_annot/`，不进仓库）：供应商的**病害（枯枝）样本标注**，不是全冠标注。`宏哥1-10`（result1～10 十幅 ~1.2 cm 正射的 1024 px 切片 135 片、251 个多边形）、`1370`（利周乡平布村另一地块 168 片、550 个）、`labels`（10 片 .pol 无图）。.pol 即 YOLO-seg 归一化格式，类别全为 0；每片只圈 1～7 株枯枝/黄化/落叶树，健康冠不圈——这就是供应商 Pest=1 的来源（目视枯枝），可用于单独训一个"枯枝树"检测器，**不能**混进树冠训练集（会教模型漏掉健康树）。
 - 各期合成影像统一用 `--te 631042 2627881 631789 2628956`、5 cm、EPSG:4544，网格完全对齐。供应商 6 月树冠相对 0524 影像偏移 dx=0.88 dy=1.50 m。
 - 本机工作目录 `~/nahua_work`：prep0524/prep0723/prep0811/prep_v06/prep_v07、labels_0322/labels_sam_v2/labels_v06/labels_v07/labels_0723_v2/labels_0811_v2/labels_0524_v2.gpkg、dataset（圆标签，勿用）、runs/<name>/best.pt、pred_<模型>_<期次>/。
 - 供应商 6 月与 7 月树冠同 ID 的几何**完全相同**（5358 株位移 0.00 m）：7 月成果只是复制 6 月树冠改了 Pest/Yield 并补了 758 株，所以两期标签不是独立的两套位置信息。
