@@ -12,7 +12,7 @@ description: 那花八角单株树冠 YOLO-seg 模型的完整训练流程：新
 ```bash
 ssh 101.37.237.221 'nvidia-smi --query-gpu=utilization.gpu,memory.used --format=csv,noheader; ls /root/work; df -h /root | tail -1'
 ```
-机器不在或 `/root/work` 空：按 `/root/work/install.sh`（或记忆里的安装步骤）重装，约 11 分钟。**所有 python 用包装脚本 `/root/work/py`**。
+机器不在或 `/root/work` 空（用户重建实例后磁盘全空、可能换 IP）：`scripts/cloud_upload.sh <ip>` 一键完成清 host key → 后台装环境（`scripts/cloud_install.sh`，约 11 分钟）→ 上传代码、标签、位移场、五期合成影像（约 2.1 GB）。只改了代码时 `scripts/cloud_upload.sh <ip> only-code`。**所有 python 用包装脚本 `/root/work/py`**。
 
 ## 1. 新一期影像预处理（本机）
 
@@ -40,21 +40,19 @@ $RUN -m treeseg.coregister --moving ~/nahua_work/labels_v07.gpkg --fixed ~/nahua
 ## 3. 上传云机
 
 ```bash
-H=101.37.237.221
-rsync -az --exclude '__pycache__' --exclude '*.pt' --exclude '*.zip' --exclude '那花*' ~/Desktop/agrosphere-treeseg/treeseg/ $H:/root/work/treeseg/treeseg/
-rsync -az ~/nahua_work/labels_*.gpkg $H:/root/work/
-rsync -az ~/nahua_work/prep<期>/ $H:/root/work/prep<期>/        # 每期约 0.3～0.6 GB
-rsync -az ~/Desktop/agrosphere-treeseg/scripts/cloud_pipeline_v6.sh $H:/root/work/
+scripts/cloud_upload.sh <ip>             # 全量：环境 + 代码 + 标签 + 五期影像（新增期次先把 prep 目录与标签加进脚本清单）
+scripts/cloud_upload.sh <ip> only-code   # 只同步代码与 cloud_pipeline_v*.sh
 ```
+本机 prep_v06/prep_v07 在云机上叫 prepv06/prepv07（脚本已映射）。
 
 ## 4. 训练 + 预测 + 打包（云机，一条脚本）
 
-以 `scripts/cloud_pipeline_v6.sh` 为模板复制一份改期次列表、模型名（mix<N>_m）与守门参数，然后：
+以 `scripts/cloud_pipeline_v7.sh`（当前版本，mix4）为模板复制一份改期次列表、模型名（mix<N>_m）与守门参数，然后：
 ```bash
-ssh $H 'setsid nohup /root/work/cloud_pipeline_v6.sh > /root/work/pipeline_v6.log 2>&1 < /dev/null & disown'
-ssh $H 'cut -d, -f1,9,13 /root/work/runs/mix3_m/results.csv | tail -1; grep -E "^\[|===|匹配" /root/work/pipeline_v6.log | tail'   # 进度
+ssh $H 'setsid nohup /root/work/cloud_pipeline_v7.sh > /root/work/pipeline_v7.log 2>&1 < /dev/null & disown'
+ssh $H 'cut -d, -f1,9,13 /root/work/runs/mix4_m/results.csv | tail -1; grep -E "^\[|===|匹配|株" /root/work/pipeline_v7.log | tail'   # 进度
 ```
-脚本做的事：dataset（v06/v07 直接用，大疆期 `--qa-field reg_dist --qa-thr 1.0 --qa-min-frac 0.4`，`--block 3 --seed 1`）→ train（yolo11m-seg，150 轮，imgsz 1024，**batch 4**，mask_ratio 4，patience 40）→ predict 目标期（conf 0.10，NMS 0.3）→ evaluate 各期 → 漏检区计数 → coregister `--field-in field_<期>.npz` 到供应商框架 → export_platform（底图用 `prep<期>_reg/composite.tif`）。300 张约 60 分钟，378 张约 80 分钟。
+脚本做的事：dataset（v06/v07 直接用，大疆期 `--qa-field reg_dist --qa-thr 1.0 --qa-min-frac 0.4`，`--block 3 --seed 1`）→ train（yolo11m-seg，150 轮，imgsz 1024，**batch 4**，mask_ratio 4，patience 40）→ predict 大疆三期（conf 0.10，NMS 0.3）+ v07 对照 → evaluate 各期 → 漏检区计数 → coregister 到供应商框架（0811 复用 `field_0811.npz` 保证底图不变，其他期以 labels_v07 为 fixed 估计并保存 `field_<期>.npz`，顺带把 composite 重采样成 `prep<期>_reg`）→ registry 台账 0524→0723→0811（`--no-auto-shift`）→ 三期各打一个 zip（ID 来自台账）。300 张约 60 分钟，400 张约 90 分钟；整条流水线约 2.5～3 小时，结束行 ALL_DONE。
 
 新一期第一次做配准底图时（只需一次）：
 ```bash
@@ -84,4 +82,6 @@ verify_export 按平台导入代码同口径解析（株数、>16KB 丢几何、
 
 ## 已知结论（不要重做）
 
-圆形伪标签不可学；TTA 无效；batch 8 OOM；0524（5 月）无训练样本 F1 只有 0.46；病虫害/产量无法从影像复现。
+圆形伪标签不可学；TTA 无效；batch 8 OOM；0524（5 月）无训练样本时 F1 只有 0.46（mix4 起已加入 0524 样本）；病虫害/产量无法从影像复现。
+供应商 6 月与 7 月树冠同 ID 几何**完全相同**（7 月只是复制 6 月再改属性、加了 758 株），所以 v06 换 v07 不会带来新的位置信息。
+0524 标签（`labels_0524_v2.gpkg`）的配准参考点用的是 SAM 冠形标签 ∪ 三套预测（模型在 0524 上召回不到一半，只用预测做参考会把漏检当错位）。

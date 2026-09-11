@@ -63,7 +63,9 @@ treeseg/verify_export.py 移植平台导入解析逻辑（unzip → 定位 → �
   - `那花6、7月_病虫害与估产合并版.zip`（14.5 GB）= 供应商成果：2026-06/2026-07 各有 RGB tif（1.2 cm，EPSG:4544）、多光谱 4 波段 tif（2 cm）、`单株病虫害估产.shp`（**真实树冠多边形**，5477/6116 株，字段 ID/Pest/Yield/Longitude/Latitude，两期 5358 个 ID 一致，Pest=1 共 223/275）。小文件解在 `~/nahua_work/vendor_0607/`，RGB 已处理为 prep_v06/prep_v07，多边形已转为 labels_v06.gpkg/labels_v07.gpkg（最好的训练标签）。
 - `那花0723-DOM/`（20 GB，已解压的 DJI Terra 目录）：2026-07-21/22 航拍（目录名是处理日期），同一块地，含 4 波段多光谱 + DSM，是供应商 7 月结果的原料；已处理为 `~/nahua_work/prep0723`。
 - 各期合成影像统一用 `--te 631042 2627881 631789 2628956`、5 cm、EPSG:4544，网格完全对齐。供应商 6 月树冠相对 0524 影像偏移 dx=0.88 dy=1.50 m。
-- 本机工作目录 `~/nahua_work`：prep0524/prep0811/prep_v06/prep_v07、labels_0322/labels_sam_v2/labels_v06/labels_v07.gpkg、dataset（圆标签，勿用）、runs/sam_m2（SAM 标签第一版模型 best.pt）、pred_sam_m2(_c0.15)。
+- 本机工作目录 `~/nahua_work`：prep0524/prep0723/prep0811/prep_v06/prep_v07、labels_0322/labels_sam_v2/labels_v06/labels_v07/labels_0723_v2/labels_0811_v2/labels_0524_v2.gpkg、dataset（圆标签，勿用）、runs/<name>/best.pt、pred_<模型>_<期次>/。
+- 供应商 6 月与 7 月树冠同 ID 的几何**完全相同**（5358 株位移 0.00 m）：7 月成果只是复制 6 月树冠改了 Pest/Yield 并补了 758 株，所以两期标签不是独立的两套位置信息。
+- `labels_0524_v2.gpkg`（2026-09-10 夜）：供应商 6 月树冠按位移场套到 0524 影像，参考点是 SAM 冠形标签 ∪ 三套模型预测（`fixed_0524_ref.gpkg`，模型在 0524 上召回不到一半，只用预测当参考会把漏检记成错位）。全局平移 dx=1.06 dy=1.41，局部修正中位 0.09 m、最大 0.61 m，逐切片守门 106/107 通过——0524 正射与供应商框架只差整体平移，而 0723/0811 有约 40% 切片对不上。
 
 ## 已验证结论（不要重复做）
 
@@ -80,5 +82,5 @@ treeseg/verify_export.py 移植平台导入解析逻辑（unzip → 定位 → �
    **mix2 `~/nahua_work/runs/mix2_m/best.pt`**（v06 + v07 + 0723 + 0811 四期混合，378 训/39 验，2026-09-10 晚）：0811 上召回 65%、精度 86%、F1 0.74（conf 0.10）；v07 F1 0.84；0723 F1 0.76。测试环境批次 17 已用它的配准结果替换：相对供应商批次 16 的树点中位距离 2.08→0.31 m，1 m 内占比 16%→75%。ultralytics 分割模型不支持 TTA（augment 静默无效）。上一版 mix_m 记录如下：
    **mix_m `~/nahua_work/runs/mix_m/best.pt`**（v06 + v07 + 大疆 0723 三期混合，266 训/24 验，batch 4，150 轮，验证集 mAP50 0.73）。用 `treeseg/register_labels.py` 把供应商 7 月树冠按局部平移场配准到大疆影像（以模型预测为同名点，残差中位 0.67→0.30 m）得到 labels_0723/labels_0811.gpkg。与配准后的供应商树冠比对：供应商影像 v06/v07 F1 0.84/0.85（精度 87%～90%），大疆 0723 F1 0.75（召回 69%、精度 81%），0811 F1 0.71（标签比影像早 3 周），0524 F1 0.46（5 月物候无训练样本）。各期预测 `~/nahua_work/pred_mix_<期次>/`，报告 `compare_v4_mix_report.log`。
 3. 大疆影像上差的主要原因是配准而非检测：大疆智图成果（RTK SINGLE）相对供应商成果整体偏 0723 dx=3.15 dy=4.14 m、0811 1.21/3.36 m、0524 0.93/1.46 m，全局平移后质心中位差仍 0.67 m（供应商影像上 0.27 m），说明偏移不均匀。下一步：a) 把 0723 影像 + 按平移量套上的 v07 标签加进训练集，让模型直接学大疆影像的色彩和纹理；b) 无人机后续航飞用 RTK 固定解或布控制点；c) 供应商标签只做训练，验收应以同期地面抽查为准。
-3. 云机脚本：`scripts/cloud_pipeline_v6.sh`（守门数据集 → 训练 → 各期预测评估 → 配准 → 打包，当前版本）；v5 为 mix2，v3 为更早的三段式。导入测试环境：zip 传到 99 的 `/opt/agrosphere-test/data/import/`，admin 登录后 POST `/api/v1/plot-analysis/import` 带 `local_archive_path=/app/data/import/<zip>` 与 `analysis_id=17` 原地替换。
+3. 云机脚本：`scripts/cloud_pipeline_v7.sh`（当前版本，mix4 = mix3 四期 + 0524：守门数据集 → 训练 → 大疆三期预测评估 → 配准（0811 复用 field_0811.npz）→ registry 台账 0524→0723→0811 → 三期各打一个 zip）；v6 为 mix3，v5 为 mix2，v3 为更早的三段式。机器重建后 `scripts/cloud_upload.sh <ip>` 一键装环境（`scripts/cloud_install.sh`）并上传全部数据（约 2.1 GB）。导入测试环境：zip 传到 99 的 `/opt/agrosphere-test/data/import/`，admin 登录后 POST `/api/v1/plot-analysis/import` 带 `local_archive_path=/app/data/import/<zip>` 与 `analysis_id=17` 原地替换。
 3. ~~对接平台导入格式~~ 已完成：`export_platform` 输出已用 AgroSphere 导入代码（locateMonitorArchiveFiles → validate → readMonitorShapefile → buildMonitorTreeImports）验证通过，平台无需改造。
