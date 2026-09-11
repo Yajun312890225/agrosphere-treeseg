@@ -40,7 +40,8 @@ def stretch_to_byte(arr, valid, lo=2, hi=98):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--terra-dir", required=True, help="DJI Terra 成果目录（含 result.tif 等）")
+    ap.add_argument("--terra-dir", default=None, help="DJI Terra 成果目录（含 result.tif 等）")
+    ap.add_argument("--rgb", default=None, help="直接指定 RGB 正射 tif（如供应商 RGB_6月.tif），不走 Terra 目录布局；与 --terra-dir 二选一或同时给")
     ap.add_argument("--out", required=True, help="输出目录")
     ap.add_argument("--epsg", type=int, default=4544, help="目标投影 EPSG，默认 4544（CGCS2000 3度带 105E）")
     ap.add_argument("--gsd", type=float, default=0.05, help="composite 分辨率(m)，默认 0.05")
@@ -50,9 +51,13 @@ def main():
     ap.add_argument("--threads", type=int, default=2, help="gdalwarp 线程数，默认 2 以免拖慢机器")
     a = ap.parse_args()
     os.makedirs(a.out, exist_ok=True)
-    td = a.terra_dir
-    has_ms = all(os.path.exists(os.path.join(td, f"result_{b}.tif")) for b in MS_BANDS)
-    print(f"多光谱波段: {'有' if has_ms else '无'}；DSM: {'有' if os.path.exists(os.path.join(td, 'dsm.tif')) else '无'}")
+    if not a.terra_dir and not a.rgb:
+        raise SystemExit("需要 --terra-dir 或 --rgb")
+    td = a.terra_dir or ""
+    rgb_src = a.rgb or os.path.join(td, "result.tif")
+    has_ms = bool(td) and all(os.path.exists(os.path.join(td, f"result_{b}.tif")) for b in MS_BANDS)
+    has_dsm = bool(td) and os.path.exists(os.path.join(td, "dsm.tif"))
+    print(f"RGB: {rgb_src}；多光谱波段: {'有' if has_ms else '无'}；DSM: {'有' if has_dsm else '无'}")
 
     # 1. 多光谱 + NDVI + DSM（低分辨率，用于统计）
     if has_ms:
@@ -73,14 +78,14 @@ def main():
         o.GetRasterBand(1).WriteArray(ndvi)
         o.FlushCache()
         del R, N, ndvi, o
-    if os.path.exists(os.path.join(td, "dsm.tif")):
+    if has_dsm:
         warp(os.path.join(td, "dsm.tif"), os.path.join(a.out, "dsm.tif"), a.epsg, a.ms_gsd, a.te, a.threads,
              ["-ot", "Float32", "-srcnodata", "-9999", "-dstnodata", "-9999"])
 
     # 2. composite
     comp = os.path.join(a.out, "composite.tif")
     if a.bands == "rgb":
-        warp(os.path.join(td, "result.tif"), comp, a.epsg, a.gsd, a.te, a.threads,
+        warp(rgb_src, comp, a.epsg, a.gsd, a.te, a.threads,
              ["-ot", "Byte", "-b", "1", "-b", "2", "-b", "3", "-srcnodata", "0", "-dstnodata", "0"])
     else:
         if not has_ms:

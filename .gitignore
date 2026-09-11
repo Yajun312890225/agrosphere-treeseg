@@ -4,3 +4,16 @@ __pycache__/
 runs/
 *.log
 .DS_Store
+# 原始数据与成果（几十 GB），不进仓库
+*.zip
+*.tif
+*.tiff
+*.gpkg
+*.shp
+*.shx
+*.dbf
+*.prj
+*.npz
+那花*/
+map/
+宏哥/

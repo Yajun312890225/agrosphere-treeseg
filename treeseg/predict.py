@@ -76,6 +76,8 @@ def main():
     ap.add_argument("--device", default=None)
     ap.add_argument("--ms-dir", default=None, help="prepare 输出目录，含 ms_*.tif 时附带逐株指数")
     ap.add_argument("--limit", type=int, default=0, help="只推理前 N 个切片（调试）")
+    ap.add_argument("--tta", action="store_true",
+                    help="测试时增强。注意 ultralytics 8.3 的分割模型不支持 augment=True（静默回退为单尺度，2026-09-10 实测结果与不开完全一致），仅保留接口")
     a = ap.parse_args()
     from ultralytics import YOLO
     model = YOLO(a.weights)
@@ -96,7 +98,7 @@ def main():
                 continue
             n_tiles += 1
             img = np.ascontiguousarray(arr.transpose(1, 2, 0)[:, :, ::-1])  # RGB -> BGR（ultralytics 约定）
-            kw = dict(imgsz=a.tile, conf=a.conf, iou=a.iou, max_det=a.max_det, retina_masks=True, verbose=False)
+            kw = dict(imgsz=a.tile, conf=a.conf, iou=a.iou, max_det=a.max_det, retina_masks=True, verbose=False, augment=a.tta)
             if a.device:
                 kw["device"] = a.device
             res = model.predict(img, **kw)[0]

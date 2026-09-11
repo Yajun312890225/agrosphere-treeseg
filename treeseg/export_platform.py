@@ -58,7 +58,9 @@ def main():
     ap.add_argument("--name", default="treeseg_batch", help="文件名前缀与 zip 名")
     ap.add_argument("--date", default="", help="采集日期 YYYY-MM-DD，写进 hash 以保证跨批次唯一")
     ap.add_argument("--id-prefix", default="T", help="没有 tree_id 时用 id 生成的 ID 前缀")
-    ap.add_argument("--simplify", type=float, default=0.05, help="树冠多边形简化容差(m)；平台单株几何上限 16KB，默认 0.05")
+    ap.add_argument("--smooth", type=float, default=0.15, help="先用 buffer(+r).buffer(-r) 抹平像元锯齿的半径(m)，0 关闭")
+    ap.add_argument("--simplify", type=float, default=0.02,
+                    help="平滑后的简化容差(m)。注意 5 cm 像元轮廓本身是锯齿，直接用 0.05 会把顶点砍掉 80%% 变成八边形；平台单株几何上限 16KB，0.02 时约 100 顶点/3KB")
     ap.add_argument("--no-zip", action="store_true", help="只生成目录，不压缩")
     a = ap.parse_args()
 
@@ -75,7 +77,13 @@ def main():
         area = float(at.get("area_m2") or g.area)
         h = hashlib.sha256(f"{a.name}|{a.date}|{tid}".encode()).hexdigest()
         pts.append(Point(c.x, c.y))
-        gs = g.simplify(a.simplify, preserve_topology=True) if a.simplify > 0 else g
+        gs = g
+        if a.smooth > 0:  # 抹平 5 cm 像元台阶，冠缘变圆滑
+            sm = geo.largest_polygon(g.buffer(a.smooth, join_style=1).buffer(-a.smooth, join_style=1))
+            if not sm.is_empty and sm.area > 0.5 * g.area:
+                gs = sm
+        if a.simplify > 0:
+            gs = gs.simplify(a.simplify, preserve_topology=True)
         crowns.append(gs if not gs.is_empty else g)
         pattrs.append({"ID": str(tid), "Lon": lon, "Lat": lat, "Pest": 0, "tree_area": area, "hash": h,
                        "conf": float(at.get("conf") or 0), "ndvi": at.get("ndvi_mean"), "ndre": at.get("ndre_mean")})

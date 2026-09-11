@@ -53,6 +53,9 @@ def main():
     ap.add_argument("--max-nodata", type=float, default=0.5, help="切片无数据比例上限")
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--prefix", default="t", help="文件名前缀（多期数据合并训练时区分）")
+    ap.add_argument("--qa-field", default=None, help="标签质量守门：标签属性字段（coregister 写的 reg_dist，到最近参考点距离 m）")
+    ap.add_argument("--qa-thr", type=float, default=1.0, help="该字段小于等于此值视为'对得上'")
+    ap.add_argument("--qa-min-frac", type=float, default=0.4, help="切片内对得上的标签比例低于此值则整片剔除（可疑标签不能当负样本）")
     a = ap.parse_args()
     random.seed(a.seed)
 
@@ -60,9 +63,15 @@ def main():
     gt = ds.GetGeoTransform()
     W, H = ds.RasterXSize, ds.RasterYSize
     epsg = geo.raster_epsg(a.raster)
-    polys = []
+    polys, qa_ok = [], []
     for lp in a.labels.split(","):
-        polys += [geo.largest_polygon(g.buffer(0)) for g, _ in geo.read_vector(lp, epsg) if g.area >= a.min_area]
+        for g, at in geo.read_vector(lp, epsg):
+            if g.area < a.min_area:
+                continue
+            polys.append(geo.largest_polygon(g.buffer(0)))
+            v = at.get(a.qa_field) if a.qa_field else None
+            qa_ok.append(v is not None and float(v) <= a.qa_thr)
+    qa_ok = np.array(qa_ok, bool)
     tree = STRtree(polys)
     print(f"影像 {W}x{H} px，标签 {len(polys)} 个，切片 {a.tile} 重叠 {a.overlap}")
 
@@ -79,7 +88,7 @@ def main():
     blocks = sorted({(ix // a.block, iy // a.block) for ix in range(len(xs)) for iy in range(len(ys))})
     random.shuffle(blocks)
     val_blocks = set(blocks[:max(1, int(len(blocks) * a.val_frac))])
-    stats = {"train": 0, "val": 0, "neg": 0, "skip": 0, "inst": 0}
+    stats = {"train": 0, "val": 0, "neg": 0, "skip": 0, "inst": 0, "qa_drop": 0}
     for iy, y0 in enumerate(ys):
         for ix, x0 in enumerate(xs):
             split = "val" if (ix // a.block, iy // a.block) in val_blocks else "train"
@@ -92,7 +101,11 @@ def main():
             wx1, wy1 = geo.pixel_to_world(gt, x0 + a.tile, y0)
             tb = box(wx0, wy0, wx1, wy1)
             lines = []
-            for idx in tree.query(tb):
+            hit = list(tree.query(tb))
+            if a.qa_field and len(hit) >= 5 and qa_ok[hit].mean() < a.qa_min_frac:
+                stats["qa_drop"] += 1  # 这片标签多数对不上参考，整片不用
+                continue
+            for idx in hit:
                 p = polys[idx]
                 c = p.intersection(tb)
                 if c.is_empty:
@@ -117,7 +130,7 @@ def main():
             stats["inst"] += len(lines)
     with open(os.path.join(a.out, "data.yaml"), "w", encoding="utf-8") as f:
         f.write(f"path: {os.path.abspath(a.out)}\ntrain: images/train\nval: images/val\nnames:\n  0: tree\n")
-    print(f"完成：train {stats['train']} 张，val {stats['val']} 张（含负样本 {stats['neg']}），实例 {stats['inst']}，跳过 {stats['skip']}")
+    print(f"完成：train {stats['train']} 张，val {stats['val']} 张（含负样本 {stats['neg']}），实例 {stats['inst']}，跳过 {stats['skip']}，标签质量剔除 {stats['qa_drop']}")
     print("data.yaml ->", os.path.join(a.out, "data.yaml"))
 
 
